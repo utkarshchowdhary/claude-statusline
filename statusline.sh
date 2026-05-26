@@ -124,11 +124,14 @@ else
     pct_used=0
 fi
 
-effort="default"
-settings_path="$HOME/.claude/settings.json"
-if [ -f "$settings_path" ]; then
-    effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+effort=$(echo "$input" | jq -r '.effort.level // empty')
+if [ -z "$effort" ] || [ "$effort" = "null" ]; then
+    settings_path="$HOME/.claude/settings.json"
+    if [ -f "$settings_path" ]; then
+        effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+    fi
 fi
+[ -z "$effort" ] && effort="default"
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Effort ──
 pct_color=$(color_for_pct "$pct_used")
@@ -182,9 +185,11 @@ if [ -n "$session_duration" ]; then
 fi
 line1+="${sep}"
 case "$effort" in
-    high)   line1+="${magenta}● ${effort}${reset}" ;;
-    medium) line1+="${dim}◑ ${effort}${reset}" ;;
-    low)    line1+="${dim}◔ ${effort}${reset}" ;;
+    low)    line1+="${dim}◔ low${reset}" ;;
+    medium) line1+="${blue}◑ medium${reset}" ;;
+    high)   line1+="${yellow}● high${reset}" ;;
+    xhigh)  line1+="${orange}● xhigh${reset}" ;;
+    max)    line1+="${red}● max${reset}" ;;
     *)      line1+="${dim}◑ ${effort}${reset}" ;;
 esac
 
