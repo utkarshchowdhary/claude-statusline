@@ -188,7 +188,9 @@ session_duration=""
 duration_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // empty')
 if [ -n "$duration_ms" ] && [ "$duration_ms" -gt 0 ] 2>/dev/null; then
     elapsed=$(( duration_ms / 1000 ))
-    if [ "$elapsed" -ge 3600 ]; then
+    if [ "$elapsed" -ge 86400 ]; then
+        session_duration="$(( elapsed / 86400 ))d$(( (elapsed % 86400) / 3600 ))h"
+    elif [ "$elapsed" -ge 3600 ]; then
         session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
     elif [ "$elapsed" -ge 60 ]; then
         session_duration="$(( elapsed / 60 ))m"
