@@ -50,6 +50,38 @@ build_bar() {
     printf "${bar_color}${filled_str}${dim}${empty_str}${reset}"
 }
 
+# Glyphs for the context bar: █ solid for filled cells,
+# ░ light-shade dots for empty ones.
+bar_fill_glyph="█"
+bar_empty_glyph="░"
+
+# Per-cell gradient, green → yellow → orange → red.
+grad_r=(46 116 186 241 239 236 233 231 211 192)
+grad_g=(204 195 186 196 161 126 101 76 66 57)
+grad_b=(113 89 64 15 24 34 44 60 50 43)
+
+# Unfilled cells.
+bar_empty='\033[38;2;60;60;60m'
+
+build_context_bar() {
+    local pct=$1
+    local width=10
+    [ "$pct" -lt 0 ] 2>/dev/null && pct=0
+    [ "$pct" -gt 100 ] 2>/dev/null && pct=100
+
+    local filled=$(( pct * width / 100 ))
+    local out="" i
+    for ((i=0; i<width; i++)); do
+        if [ "$i" -lt "$filled" ]; then
+            out+="\033[38;2;${grad_r[$i]};${grad_g[$i]};${grad_b[$i]}m${bar_fill_glyph}"
+        else
+            out+="${bar_empty}${bar_empty_glyph}"
+        fi
+    done
+
+    printf "%s" "${out}${reset}"
+}
+
 format_epoch_time() {
     local epoch=$1
     local style=$2
@@ -109,19 +141,23 @@ iso_to_epoch() {
 
 # ── Extract JSON data ───────────────────────────────────
 model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
+model_name=${model_name/ context)/)}
 
-size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
-[ "$size" -eq 0 ] 2>/dev/null && size=200000
+# Claude Code pre-calculates this and it matches what the UI reports; it can be
+# null early in a session, so fall back to summing the last response's tokens.
+pct_used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+pct_used=${pct_used%.*}
 
-input_tokens=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
-cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
-cache_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
-current=$(( input_tokens + cache_create + cache_read ))
+if [ -z "$pct_used" ]; then
+    size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
+    [ "$size" -eq 0 ] 2>/dev/null && size=200000
 
-if [ "$size" -gt 0 ]; then
+    input_tokens=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
+    cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
+    cache_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
+    current=$(( input_tokens + cache_create + cache_read ))
+
     pct_used=$(( current * 100 / size ))
-else
-    pct_used=0
 fi
 
 effort=$(echo "$input" | jq -r '.effort.level // empty')
@@ -149,19 +185,15 @@ if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 session_duration=""
-session_start=$(echo "$input" | jq -r '.session.start_time // empty')
-if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
-    start_epoch=$(iso_to_epoch "$session_start")
-    if [ -n "$start_epoch" ]; then
-        now_epoch=$(date +%s)
-        elapsed=$(( now_epoch - start_epoch ))
-        if [ "$elapsed" -ge 3600 ]; then
-            session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
-        elif [ "$elapsed" -ge 60 ]; then
-            session_duration="$(( elapsed / 60 ))m"
-        else
-            session_duration="${elapsed}s"
-        fi
+duration_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // empty')
+if [ -n "$duration_ms" ] && [ "$duration_ms" -gt 0 ] 2>/dev/null; then
+    elapsed=$(( duration_ms / 1000 ))
+    if [ "$elapsed" -ge 3600 ]; then
+        session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
+    elif [ "$elapsed" -ge 60 ]; then
+        session_duration="$(( elapsed / 60 ))m"
+    else
+        session_duration="${elapsed}s"
     fi
 fi
 
@@ -173,7 +205,7 @@ fi
 
 line1="${blue}${model_name}${reset}"
 line1+="${sep}"
-line1+="✍️ ${pct_color}${pct_used}%${reset}"
+line1+="$(build_context_bar "$pct_used") ${pct_color}${pct_used}%${reset}"
 line1+="${sep}"
 line1+="${skip_perms}${cyan}${dirname}${reset}"
 if [ -n "$git_branch" ]; then
